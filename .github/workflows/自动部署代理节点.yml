@@ -40,10 +40,13 @@ jobs:
 
     - name: Install CF CLI
       run: |
-        wget -q -O - https://packages.cloudfoundry.org/debian/cli.cloudfoundry.org.key | sudo apt-key add -
-        echo "deb https://packages.cloudfoundry.org/debian stable main" | sudo tee /etc/apt/sources.list.d/cloudfoundry-cli.list
-        sudo apt-get update
-        sudo apt-get install -y cf8-cli
+        # 使用 v8 最新版本
+        wget -q "https://packages.cloudfoundry.org/stable?release=linux64-binary&version=v8&source=github" -O cf-cli.tgz
+        tar -xzf cf-cli.tgz
+        sudo mv cf8 /usr/local/bin/cf
+        sudo chmod +x /usr/local/bin/cf
+        cf version
+        echo "CF CLI installed successfully"
 
     - name: Determine app name and Docker image
       run: |
@@ -69,28 +72,114 @@ jobs:
           fi
         fi
 
+        echo "=========================================="
         echo "应用名称: $APP_NAME"
         echo "部署类型: $DOCKER_IMAGE"
         echo "组织: yidai6666_gmail_com"
         echo "空间: ${{ github.event.inputs.space }}"
+        echo "=========================================="
+
+    - name: Debug - Check Secrets
+      run: |
+        echo "========== 调试: 检查 Secrets 配置 =========="
+        if [ -n "${{ secrets.CF_USERNAME }}" ]; then
+          echo "✅ CF_USERNAME 已设置 (长度: ${#CF_USERNAME})"
+        else
+          echo "❌ CF_USERNAME 未设置或为空!"
+          echo "请在 GitHub 仓库 Settings -> Secrets -> Actions 中添加 CF_USERNAME"
+        fi
+
+        if [ -n "${{ secrets.CF_PASSWORD }}" ]; then
+          echo "✅ CF_PASSWORD 已设置 (长度: ${#CF_PASSWORD})"
+        else
+          echo "❌ CF_PASSWORD 未设置或为空!"
+          echo "请在 GitHub 仓库 Settings -> Secrets -> Actions 中添加 CF_PASSWORD"
+        fi
+
+        if [ -z "${{ secrets.CF_USERNAME }}" ] || [ -z "${{ secrets.CF_PASSWORD }}" ]; then
+          echo ""
+          echo "⚠️ 缺少必要的 Secrets，工作流无法继续运行"
+          echo "请先配置好 Secrets 后重新触发工作流"
+          exit 1
+        fi
+        echo "=========================================="
 
     - name: Login to Anynines Cloud Foundry
       run: |
+        echo "========== 登录 Anynines Cloud Foundry =========="
+        
+        # 设置 API 端点
+        echo "设置 API 端点: https://api.de.a9s.eu"
         cf api https://api.de.a9s.eu
-        cf login -u "${{ secrets.CF_USERNAME }}" -p "${{ secrets.CF_PASSWORD }}" -o "yidai6666_gmail_com" -s "${{ github.event.inputs.space }}"
+        
+        # 尝试方式1: 直接使用参数登录
+        echo "尝试使用参数方式登录..."
+        if cf login -u "${{ secrets.CF_USERNAME }}" -p "${{ secrets.CF_PASSWORD }}" -o "yidai6666_gmail_com" -s "${{ github.event.inputs.space }}"; then
+          echo "✅ 登录成功 (参数方式)"
+        else
+          echo "参数方式登录失败，尝试管道方式..."
+          
+          # 尝试方式2: 使用管道输入（stdin）方式登录
+          echo "尝试使用管道方式登录..."
+          printf '%s\n%s\n' "${{ secrets.CF_USERNAME }}" "${{ secrets.CF_PASSWORD }}" | cf login -a "https://api.de.a9s.eu" -o "yidai6666_gmail_com" -s "${{ github.event.inputs.space }}"
+          
+          if [ $? -eq 0 ]; then
+            echo "✅ 登录成功 (管道方式)"
+          else
+            echo "❌ 两种登录方式都失败了!"
+            echo ""
+            echo "请检查:"
+            echo "1. CF_USERNAME 是否为你的 Anynines 登录邮箱"
+            echo "2. CF_PASSWORD 是否为你的 Anynines 登录密码"
+            echo "3. 密码中是否有特殊字符需要转义"
+            echo ""
+            echo "可以在本地测试登录命令:"
+            echo "  cf api https://api.de.a9s.eu"
+            echo "  cf login -u YOUR_EMAIL -p YOUR_PASSWORD -o yidai6666_gmail_com -s ${{ github.event.inputs.space }}"
+            exit 1
+          fi
+        fi
+        
+        echo "=========================================="
+        echo "当前目标:"
+        cf target
+        echo "=========================================="
 
     - name: Deploy application
       run: |
-        if cf push ${{ env.APP_NAME }} --docker-image ${{ env.DOCKER_IMAGE }} -m ${{ env.MEMORY }} -k ${{ env.DISK }} --health-check-type port; then
-          echo "Deployment successful"
-        else
+        echo "========== 部署应用: ${{ env.APP_NAME }} =========="
+        echo "Docker 镜像: ${{ env.DOCKER_IMAGE }}"
+        echo "内存限制: ${{ env.MEMORY }}"
+        echo "磁盘限制: ${{ env.DISK }}"
+        echo ""
+        
+        # 先检查是否已存在同名应用
+        if cf app ${{ env.APP_NAME }} > /dev/null 2>&1; then
+          echo "⚠️ 应用 ${{ env.APP_NAME }} 已存在，将删除后重新部署"
           cf delete ${{ env.APP_NAME }} -r -f
-          echo "部署失败,已清理失败部署残留,请检查资源是否充足"
+        fi
+        
+        if cf push ${{ env.APP_NAME }} --docker-image ${{ env.DOCKER_IMAGE }} -m ${{ env.MEMORY }} -k ${{ env.DISK }} --health-check-type port; then
+          echo ""
+          echo "✅ 应用部署成功!"
+        else
+          echo ""
+          echo "❌ 应用部署失败!"
+          echo "正在清理失败部署残留..."
+          cf delete ${{ env.APP_NAME }} -r -f
+          echo ""
+          echo "可能的原因:"
+          echo "1. Docker 镜像拉取失败"
+          echo "2. 资源配额不足"
+          echo "3. 端口配置问题"
           exit 1
         fi
+        echo "=========================================="
 
     - name: Set environment variables
       run: |
+        echo "========== 设置环境变量 =========="
+        
         # 基础环境变量
         cf set-env ${{ env.APP_NAME }} NAME "Anynines"
         cf set-env ${{ env.APP_NAME }} UUID "${{ secrets.UUID }}"
@@ -114,25 +203,43 @@ jobs:
             echo "设置 DOMAIN 环境变量为: $ROUTE"
             cf set-env ${{ env.APP_NAME }} DOMAIN "$ROUTE"
           else
-            echo "⚠️ 未找到应用路由，无法设置 DOMAIN,请手动将节点里的address、host和sni改为应用域名"
+            echo "⚠️ 未找到应用路由，无法设置 DOMAIN"
+            echo "请手动将节点里的 address、host 和 sni 改为应用域名"
           fi
         fi
+        
+        echo "✅ 环境变量设置完成"
+        echo "=========================================="
 
     - name: Restage application
       run: |
+        echo "========== 重启应用 =========="
         cf restage ${{ env.APP_NAME }}
+        echo "✅ 应用重启完成"
+        echo "=========================================="
 
     - name: Verify deployment
       run: |
+        echo "========== 验证部署 =========="
         cf app ${{ env.APP_NAME }}
-        echo "Deployment completed successfully!"
+        echo "=========================================="
+        echo "✅ 部署验证完成!"
+        echo "=========================================="
 
     - name: 详细部署信息
       run: |
-        echo "🚀 部署完成！详细信息如下："
+        echo ""
+        echo "╔══════════════════════════════════════════╗"
+        echo "║       🚀 部署完成！详细信息如下：         ║"
+        echo "╚══════════════════════════════════════════╝"
+        echo ""
         echo "平台: Anynines (a9sapp.eu)"
+        echo "组织(ORG): yidai6666_gmail_com"
         echo "空间(SPACE): ${{ github.event.inputs.space }}"
+        echo "节点类型: ${{ github.event.inputs.type }}"
+        echo "Docker 镜像: ${{ env.DOCKER_IMAGE }}"
         echo "应用名称(App Name): ${{ env.APP_NAME }}"
+        echo ""
 
         # 获取应用路由
         ROUTE=$(cf app ${{ env.APP_NAME }} | grep "routes:" | awk '{print $2}')
@@ -140,4 +247,9 @@ jobs:
           echo "应用 URL (APP_URL): https://$ROUTE"
         else
           echo "⚠️ 未找到应用路由，请检查部署状态。"
+          echo "可以手动运行: cf app ${{ env.APP_NAME }}"
         fi
+        echo ""
+        echo "╔══════════════════════════════════════════╗"
+        echo "║            ✅ 所有步骤完成！              ║"
+        echo "╚══════════════════════════════════════════╝"
