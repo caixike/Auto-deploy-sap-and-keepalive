@@ -1,137 +1,74 @@
-name: 自动保活 SAP
+name: Anynines App Keepalive
 
 on:
   schedule:
-    - cron: '58 23 * * *'
+    - cron: '0 */6 * * *'
   workflow_dispatch:
 
 jobs:
-  restart-sg-apps:
+  keepalive:
     runs-on: ubuntu-latest
-    name: Restart SG Apps
-    if: always()
+    name: Ping Apps to Keep Alive
     continue-on-error: true
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Install CF CLI
+    - name: Ping App 1 (proxybxssde)
       run: |
-        wget -q -O - https://packages.cloudfoundry.org/debian/cli.cloudfoundry.org.key | sudo apt-key add -
-        echo "deb https://packages.cloudfoundry.org/debian stable main" | sudo tee /etc/apt/sources.list.d/cloudfoundry-cli.list
-        sudo apt-get update
-        sudo apt-get install -y cf8-cli
-
-    - name: Determine CF API endpoint
-      run: |
-        echo "CF_API=https://api.cf.ap21.hana.ondemand.com" >> $GITHUB_ENV
-        echo "使用API端点: $CF_API (区域: SG)"
-
-    - name: Login to Cloud Foundry
-      run: |
-        cf login -a ${{ env.CF_API }} -u "${{ secrets.EMAIL }}" -p "${{ secrets.PASSWORD }}"
-        ORG=$(cf orgs | sed -n '4p')
-        echo "Selected org: $ORG"
-        echo "ORG=$ORG" >> $GITHUB_ENV
-        SPACE=$(cf spaces | sed -n '4p')
-        echo "Selected space: $SPACE"
-        echo "SPACE=$SPACE" >> $GITHUB_ENV
-        cf login -a ${{ env.CF_API }} -u "${{ secrets.EMAIL }}" -p "${{ secrets.PASSWORD }}" -o "$ORG" -s "$SPACE"
-
-    - name: Get all applications
-      id: get-sg-apps
-      run: |
-        apps=$(cf apps | awk 'NR>3 {print $1}' | grep -v '^$')
-        echo "发现的应用:"
-        echo "$apps"
-        echo "apps<<EOF" >> $GITHUB_OUTPUT
-        echo "$apps" >> $GITHUB_OUTPUT
-        echo "EOF" >> $GITHUB_OUTPUT
-
-    - name: Restart all applications
-      run: |
-        apps="${{ steps.get-sg-apps.outputs.apps }}"
-        if [ -z "$apps" ]; then
-          echo "在区域 SG 中未找到任何应用"
-          exit 0
-        fi
-        echo "重启区域 SG 中的应用:"
-        echo "$apps"
-        for app in $apps; do
-          echo "正在重启应用: $app"
-          cf restart "$app"
-          echo "应用 $app 重启成功"
-          echo "----------------------------------------"
-          sleep 20
+        echo "=== 保活: a9s-proxybxssde ==="
+        for i in 1 2 3; do
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "https://a9s-proxybxssde.de.a9sapp.eu" || echo "000")
+          echo "第${i}次请求 HTTP状态码: $HTTP_CODE"
+          if [ "$HTTP_CODE" != "000" ]; then
+            echo "App 1 在线 (HTTP $HTTP_CODE)"
+            break
+          fi
+          echo "等待10秒后重试..."
+          sleep 10
         done
 
-    - name: Verify applications status
+    - name: Ping App 1 Sub Endpoint
       run: |
-        echo "区域 SG 中所有应用的最终状态:"
-        cf apps
-
-  restart-us-apps:
-    runs-on: ubuntu-latest
-    name: Restart US Apps
-    if: always()
-    continue-on-error: true
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Install CF CLI
-      run: |
-        wget -q -O - https://packages.cloudfoundry.org/debian/cli.cloudfoundry.org.key | sudo apt-key add -
-        echo "deb https://packages.cloudfoundry.org/debian stable main" | sudo tee /etc/apt/sources.list.d/cloudfoundry-cli.list
-        sudo apt-get update
-        sudo apt-get install -y cf8-cli
-
-    - name: Determine CF API endpoint
-      run: |
-        echo "CF_API=https://api.cf.us10-001.hana.ondemand.com" >> $GITHUB_ENV
-        echo "使用API端点: $CF_API (区域: US)"
-
-    - name: Login to Cloud Foundry
-      run: |
-        cf login -a ${{ env.CF_API }} -u "${{ secrets.EMAIL }}" -p "${{ secrets.PASSWORD }}"
-        ORG=$(cf orgs | sed -n '4p')
-        echo "Selected org: $ORG"
-        echo "ORG=$ORG" >> $GITHUB_ENV
-        SPACE=$(cf spaces | sed -n '4p')
-        echo "Selected space: $SPACE"
-        echo "SPACE=$SPACE" >> $GITHUB_ENV
-        cf login -a ${{ env.CF_API }} -u "${{ secrets.EMAIL }}" -p "${{ secrets.PASSWORD }}" -o "$ORG" -s "$SPACE"
-
-    - name: Get all applications
-      id: get-us-apps
-      run: |
-        apps=$(cf apps | awk 'NR>3 {print $1}' | grep -v '^$')
-        echo "发现的应用:"
-        echo "$apps"
-        echo "apps<<EOF" >> $GITHUB_OUTPUT
-        echo "$apps" >> $GITHUB_OUTPUT
-        echo "EOF" >> $GITHUB_OUTPUT
-
-    - name: Restart all applications
-      run: |
-        apps="${{ steps.get-us-apps.outputs.apps }}"
-        if [ -z "$apps" ]; then
-          echo "在区域 US 中未找到任何应用"
-          exit 0
+        echo "=== 保活订阅端点: a9s-proxybxssde/sub ==="
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "https://a9s-proxybxssde.de.a9sapp.eu/sub" || echo "000")
+        echo "HTTP状态码: $HTTP_CODE"
+        if [ "$HTTP_CODE" = "200" ]; then
+          echo "订阅端点正常"
+        else
+          echo "订阅端点异常 (HTTP $HTTP_CODE)"
         fi
-        echo "重启区域 US 中的应用:"
-        echo "$apps"
-        for app in $apps; do
-          echo "正在重启应用: $app"
-          cf restart "$app"
-          echo "应用 $app 重启成功"
-          echo "----------------------------------------"
-          sleep 20
+
+    - name: Ping App 2 (proxyglxdcn)
+      run: |
+        echo "=== 保活: a9s-proxyglxdcn ==="
+        for i in 1 2 3; do
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "https://a9s-proxyglxdcn.de.a9sapp.eu" || echo "000")
+          echo "第${i}次请求 HTTP状态码: $HTTP_CODE"
+          if [ "$HTTP_CODE" != "000" ]; then
+            echo "App 2 在线 (HTTP $HTTP_CODE)"
+            break
+          fi
+          echo "等待10秒后重试..."
+          sleep 10
         done
 
-    - name: Verify applications status
+    - name: Ping App 2 Sub Endpoint
       run: |
-        echo "区域 US 中所有应用的最终状态:"
-        cf apps
+        echo "=== 保活订阅端点: a9s-proxyglxdcn/sub ==="
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "https://a9s-proxyglxdcn.de.a9sapp.eu/sub" || echo "000")
+        echo "HTTP状态码: $HTTP_CODE"
+        if [ "$HTTP_CODE" = "200" ]; then
+          echo "订阅端点正常"
+        else
+          echo "订阅端点异常 (HTTP $HTTP_CODE)"
+        fi
+
+    - name: Summary
+      if: always()
+      run: |
+        echo "========== 保活结果摘要 =========="
+        echo "保活时间: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        echo "保活方式: HTTP ping (适用于 Anynines 平台)"
+        echo "保活间隔: 每6小时"
+        echo "App 1: https://a9s-proxybxssde.de.a9sapp.eu"
+        echo "App 2: https://a9s-proxyglxdcn.de.a9sapp.eu"
+        echo "=================================="
