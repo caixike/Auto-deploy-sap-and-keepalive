@@ -145,6 +145,35 @@ jobs:
         cf target
         echo "=========================================="
 
+    - name: Cleanup old apps (free memory quota)
+      run: |
+        echo "========== 清理旧应用释放内存配额 =========="
+        
+        # 获取所有应用名称
+        APP_LIST=$(cf apps | grep "a9s-proxy" | awk '{print $1}')
+        
+        if [ -z "$APP_LIST" ]; then
+          echo "✅ 没有需要清理的旧应用"
+        else
+          echo "发现以下旧应用，正在清理..."
+          echo "$APP_LIST"
+          echo ""
+          
+          while IFS= read -r app; do
+            if [ -n "$app" ] && [ "$app" != "name" ]; then
+              echo "🗑️  正在删除: $app"
+              cf delete "$app" -r -f
+              echo "   ✅ 已删除: $app"
+            fi
+          done <<< "$APP_LIST"
+        fi
+        
+        echo ""
+        echo "========== 清理完成 =========="
+        echo "当前应用列表:"
+        cf apps
+        echo "=========================================="
+
     - name: Deploy application
       run: |
         echo "========== 部署应用: ${{ env.APP_NAME }} =========="
@@ -152,12 +181,6 @@ jobs:
         echo "内存限制: ${{ env.MEMORY }}"
         echo "磁盘限制: ${{ env.DISK }}"
         echo ""
-        
-        # 先检查是否已存在同名应用
-        if cf app ${{ env.APP_NAME }} > /dev/null 2>&1; then
-          echo "⚠️ 应用 ${{ env.APP_NAME }} 已存在，将删除后重新部署"
-          cf delete ${{ env.APP_NAME }} -r -f
-        fi
         
         if cf push ${{ env.APP_NAME }} --docker-image ${{ env.DOCKER_IMAGE }} -m ${{ env.MEMORY }} -k ${{ env.DISK }} --health-check-type port; then
           echo ""
