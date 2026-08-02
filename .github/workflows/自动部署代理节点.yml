@@ -189,10 +189,10 @@ jobs:
         cf set-env ${{ env.APP_NAME }} NEZHA_PORT "${{ secrets.NEZHA_PORT }}"
         cf set-env ${{ env.APP_NAME }} NEZHA_KEY "${{ secrets.NEZHA_KEY }}"
         
-        # 哪吒监控环境变量 (NZ_* 格式 - 新版本 agent 使用)
+        # 哪吒监控环境变量 (NZ_* 格式 - v1 agent 使用)
         cf set-env ${{ env.APP_NAME }} NZ_SERVER "${{ secrets.NEZHA_SERVER }}:${{ secrets.NEZHA_PORT }}"
+        cf set-env ${{ env.APP_NAME }} NZ_KEY "${{ secrets.NEZHA_KEY }}"
         cf set-env ${{ env.APP_NAME }} NZ_TLS "true"
-        cf set-env ${{ env.APP_NAME }} NZ_CLIENT_SECRET "${{ secrets.NEZHA_KEY }}"
         
         # Argo 隧道环境变量
         cf set-env ${{ env.APP_NAME }} ARGO_PORT "${{ secrets.ARGO_PORT }}"
