@@ -9,12 +9,10 @@ jobs:
   keepalive-and-restart:
     runs-on: ubuntu-latest
     name: Check URL and Restart SG Apps
-    if: always()
-    continue-on-error: true
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Check node URL health
       id: check-url
@@ -40,13 +38,13 @@ jobs:
     - name: Login to Cloud Foundry
       if: steps.check-url.outputs.http_code != '200'
       run: |
-        echo "CF_API=https://api.cf.ap21.hana.ondemand.com" >> $GITHUB_ENV
+        export CF_API="https://api.cf.ap21.hana.ondemand.com"
         echo "使用API端点: $CF_API (区域: SG)"
-        cf login -a ${{ env.CF_API }} -u "${{ secrets.EMAIL }}" -p "${{ secrets.PASSWORD }}"
+        cf login -a "$CF_API" -u "${{ secrets.EMAIL }}" -p "${{ secrets.PASSWORD }}"
         ORG=$(cf orgs | sed -n '4p')
         echo "ORG=$ORG" >> $GITHUB_ENV
         echo "使用空间: dev"
-        cf login -a ${{ env.CF_API }} -u "${{ secrets.EMAIL }}" -p "${{ secrets.PASSWORD }}" -o "$ORG" -s "dev"
+        cf login -a "$CF_API" -u "${{ secrets.EMAIL }}" -p "${{ secrets.PASSWORD }}" -o "$ORG" -s "dev"
 
     - name: Restart all applications
       if: steps.check-url.outputs.http_code != '200'
